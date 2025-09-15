@@ -7,6 +7,7 @@ class CommandTypes(Enum):
     MATCHMAKING_COMMAND = "MATCHMAKING_COMMAND"
     REGISTER_COMMAND = "REGISTER_COMMAND"
     LOGIN_COMMAND = "LOGIN_COMMAND"
+    LOGOUT_COMMAND = "LOGOUT_COMMAND"
     ADDITIONAL_COMMAND = "ADDITIONAL_COMMAND"
 
 
@@ -26,7 +27,16 @@ class CommandRoster:
         }
 
     def command_exists(self, command: str) -> bool:
-        return command in self.command_dict
+        print(command)
+        print("____")
+        return command in self.command_dict.keys()
 
     def command_type(self, command: str) -> CommandTypes:
         return self.command_dict[command]
+
+    def get_all_commands_help(self):
+        help_text = ""
+        for command in self.command_dict:
+            # RE DO: CLARIFY COMMANDS (Remake class)
+            help_text += command + "\n"
+        return help_text

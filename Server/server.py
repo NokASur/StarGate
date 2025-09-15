@@ -3,10 +3,10 @@ import threading
 import time
 
 from datetime import datetime
-from lib import connection_timeout_reached
+from lib import connection_timeout_reached, acceptable_name, acceptable_password
 from commands import CommandTypes, Command, CommandRoster
-from client import Client
-from enum import Enum
+from client import Client, ClientStates
+from DataBase.lib import find_user
 
 HOST = '127.0.0.1'
 PORT = 65432
@@ -20,8 +20,9 @@ class Server:
                 Command(CommandTypes.QUIT_COMMAND, {'exit', 'quit', 'q'}),
                 Command(CommandTypes.MATCHMAKING_COMMAND, {'matchmaking', 'mm'}),
                 Command(CommandTypes.REGISTER_COMMAND, {'register', 'reg'}),
-                Command(CommandTypes.LOGIN_COMMAND, {'login', 'l'}),
-                Command(CommandTypes.ADDITIONAL_COMMAND, set())
+                Command(CommandTypes.LOGIN_COMMAND, {'login', 'lgn'}),
+                Command(CommandTypes.LOGOUT_COMMAND, {'logout', 'lgt'}),
+                Command(CommandTypes.ADDITIONAL_COMMAND, {'placeholder'})
             ]
         )
 
@@ -38,7 +39,7 @@ class Server:
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             s.bind((self.HOST, self.PORT))
             s.listen()
-            print(f"Server listening on {self.HOST}:{self.PORT}")
+            print(f"Server listening on {self.HOST}:{self.PORT}\n")
 
             self.start_matchmaking()
             print(f"Matchmaking online")
@@ -53,20 +54,21 @@ class Server:
                     daemon=True
                 )
                 client_thread.start()
-                print(f"Active connections: {len(self.clients)}")
+                print(f"Active connections: {len(self.clients)}\n")
 
-    def send_help(self):
-        pass
+    def send_help(self, client: Client):
+        help_text = self.ALL_COMMANDS.get_all_commands_help()
+        client.conn.sendall(help_text.encode())
 
     def handle_client(self, client: Client):
-        print(f'Connected by {client.addr} to {self.HOST}:{self.PORT}')
+        print(f'Connected by {client.addr} to {self.HOST}:{self.PORT}\n')
         connection_timestamp = datetime.now()
         greeting = True
         try:
-            with client.conn:
+            with (client.conn):
                 while True:
                     if connection_timeout_reached(connection_timestamp):
-                        print(f"Connection timeout reached for {client.addr}.")
+                        print(f"Connection timeout reached for {client.addr}.\n")
                         client.conn.sendall('q'.encode())
                         self.clients.remove(client)
                         break
@@ -78,14 +80,65 @@ class Server:
                     # if not client.is_logged_in():
                     #     client.conn.sendall(b'Please log in first. Alternatively, send "h" to get some help')
 
-                    data = str(client.conn.recv(1024).decode())
+                    data = str(client.conn.recv(1024).decode()).strip()
 
                     if data:
-                        if self.ALL_COMMANDS.command_exists(data):
+                        print("HERE1")
+                        print(ClientStates.LOGGING_IN_NAME.value <= client.state.value <= ClientStates.REGISTRATION_PASSWORD.value)
+                        print(self.ALL_COMMANDS.command_exists(data))
+                        # Handling registration
+                        if ClientStates.LOGGING_IN_NAME.value <= client.state.value <= ClientStates.REGISTRATION_PASSWORD_CONFIRMATION.value:
+                            print("HERE2")
+                            match client.state:
+                                case ClientStates.LOGGING_IN_NAME:
+                                    client.conn.sendall(b'Enter your password')
+                                    client.state = ClientStates.LOGGING_IN_PASSWORD
+                                    client.temporary_data_storage["name"] = data
+
+                                case ClientStates.LOGGING_IN_PASSWORD:
+                                    client.temporary_data_storage["password"] = data
+                                    if find_user(
+                                            client.temporary_data_storage["name"],
+                                            client.temporary_data_storage["password"]
+                                    ):
+                                        client.conn.sendall(
+                                            f"Successfully logged in into"
+                                            f" {client.temporary_data_storage["name"]}'s account.")
+                                        client.state = ClientStates.LOGGED_IN
+
+                                case ClientStates.REGISTRATION_NAME:
+                                    if acceptable_name(data):
+                                        client.conn.sendall(b'Enter your password')
+                                        client.state = ClientStates.REGISTRATION_PASSWORD
+                                        client.temporary_data_storage["name"] = data
+                                    else:
+                                        client.conn.sendall(b'Unacceptable name, try again')
+
+                                case ClientStates.REGISTRATION_PASSWORD:
+                                    if acceptable_password(data):
+                                        client.conn.sendall(b'Repeat your password')
+                                        client.state = ClientStates.REGISTRATION_PASSWORD_CONFIRMATION
+                                        client.temporary_data_storage["password"] = data
+                                    else:
+                                        client.conn.sendall(b'Unacceptable password, try again')
+
+                                case ClientStates.REGISTRATION_PASSWORD_CONFIRMATION:
+                                    print(f"data: {data}, pswrd: {client.temporary_data_storage['password']}")
+                                    if data == client.temporary_data_storage['password']:
+                                        client.conn.sendall(b'Registration complete.')
+                                        client.state = ClientStates.LOGGED_IN
+                                    else:
+                                        client.conn.sendall(
+                                            b'Passwords do not match. Enter your password from scratch.')
+                                        client.state = ClientStates.REGISTRATION_PASSWORD
+
+                        # Handling commands
+                        elif self.ALL_COMMANDS.command_exists(data):
+                            print("HERE3")
                             match self.ALL_COMMANDS.command_type(data):
                                 case CommandTypes.HELP_COMMAND:
                                     print(f"Help requested by {client.addr}.")
-                                    self.send_help()
+                                    self.send_help(client)
 
                                 case CommandTypes.QUIT_COMMAND:
                                     print(f"Connection closure requested by {client.addr}.")
@@ -95,15 +148,22 @@ class Server:
                                     if client.is_logged_in():
                                         print(f"Matchmaking request from {client.addr}, Name '{client.get_name()}'.")
                                         self.matchmaking_clients.add(client)
+                                        print(self.matchmaking_clients)
+                                        client.conn.sendall(b"Searching")
+                                    else:
+                                        client.conn.sendall(
+                                            b"Unregistered users cannot use matchmaking. "
+                                            b"Please register."
+                                        )
 
                                 case CommandTypes.REGISTER_COMMAND:
-                                    name = self.ask_name()
-                                    password = self.ask_password(registration=True)
+                                    client.conn.sendall(b'Enter your username')
+                                    client.state = ClientStates.REGISTRATION_NAME
                                     # DB
 
                                 case CommandTypes.LOGIN_COMMAND:
-                                    name = self.ask_name()
-                                    password = self.ask_password(registration=False)
+                                    client.conn.sendall(b'Enter your username')
+                                    client.state = ClientStates.LOGGING_IN_NAME
                                     # DB
 
                                 case CommandTypes.ADDITIONAL_COMMAND:
@@ -113,9 +173,9 @@ class Server:
                                 case _:
                                     client.conn.sendall(b"Invalid command!")
                         else:
+                            print("HERE4")
                             client.conn.sendall(b'Invalid command!')
-
-                    client.conn.sendall(data)
+                        print("HERE5")
                     time.sleep(0.2)
 
         except Exception as e:
@@ -128,7 +188,9 @@ class Server:
 
     def matchmaking_loop(self):
         while True:
+            print("Matchmaking loop")
             while len(self.matchmaking_clients) >= 2:
+                print("Matchmaking game found")
                 player1: Client = self.matchmaking_clients.pop()
                 player2: Client = self.matchmaking_clients.pop()
                 player1.conn.sendall(b'Match found')
