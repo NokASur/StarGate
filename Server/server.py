@@ -6,7 +6,7 @@ from datetime import datetime
 from lib import connection_timeout_reached, acceptable_name, acceptable_password
 from commands import CommandTypes, Command, CommandRoster
 from client import Client, ClientStates
-from DataBase.lib import find_user
+from Database.database import Database
 
 HOST = '127.0.0.1'
 PORT = 65432
@@ -40,7 +40,7 @@ class Server:
             s.bind((self.HOST, self.PORT))
             s.listen()
             print(f"Server listening on {self.HOST}:{self.PORT}\n")
-
+            db = Database()
             self.start_matchmaking()
             print(f"Matchmaking online")
 
@@ -50,7 +50,7 @@ class Server:
                 self.clients.add(client)
                 client_thread = threading.Thread(
                     target=self.handle_client,
-                    args=[client],
+                    args=[client, db],
                     daemon=True
                 )
                 client_thread.start()
@@ -60,7 +60,7 @@ class Server:
         help_text = self.ALL_COMMANDS.get_all_commands_help()
         client.conn.sendall(help_text.encode())
 
-    def handle_client(self, client: Client):
+    def handle_client(self, client: Client, db: Database) -> None:
         print(f'Connected by {client.addr} to {self.HOST}:{self.PORT}\n')
         connection_timestamp = datetime.now()
         greeting = True
@@ -84,7 +84,8 @@ class Server:
 
                     if data:
                         print("HERE1")
-                        print(ClientStates.LOGGING_IN_NAME.value <= client.state.value <= ClientStates.REGISTRATION_PASSWORD.value)
+                        print(
+                            ClientStates.LOGGING_IN_NAME.value <= client.state.value <= ClientStates.REGISTRATION_PASSWORD.value)
                         print(self.ALL_COMMANDS.command_exists(data))
                         # Handling registration
                         if ClientStates.LOGGING_IN_NAME.value <= client.state.value <= ClientStates.REGISTRATION_PASSWORD_CONFIRMATION.value:
@@ -97,10 +98,11 @@ class Server:
 
                                 case ClientStates.LOGGING_IN_PASSWORD:
                                     client.temporary_data_storage["password"] = data
-                                    if find_user(
+                                    if db.find_user(
                                             client.temporary_data_storage["name"],
                                             client.temporary_data_storage["password"]
                                     ):
+                                        db.create_user_session_into_pool(client.temporary_data_storage["name"])
                                         client.conn.sendall(
                                             f"Successfully logged in into"
                                             f" {client.temporary_data_storage["name"]}'s account.")
@@ -126,6 +128,7 @@ class Server:
                                     print(f"data: {data}, pswrd: {client.temporary_data_storage['password']}")
                                     if data == client.temporary_data_storage['password']:
                                         client.conn.sendall(b'Registration complete.')
+                                        db.create_user_session_into_pool(client.temporary_data_storage["name"])
                                         client.state = ClientStates.LOGGED_IN
                                     else:
                                         client.conn.sendall(
@@ -184,6 +187,7 @@ class Server:
         finally:
             self.clients.discard(client)
             self.matchmaking_clients.discard(client)
+            db.session_pool.pop(client.temporary_data_storage["name"], None)
             print(f"Connection with {client.addr} closed")
 
     def matchmaking_loop(self):
@@ -204,3 +208,4 @@ class Server:
             daemon=True
         )
         self.matchmaking_thread.start()
+
