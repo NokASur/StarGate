@@ -1,6 +1,9 @@
+from datetime import datetime
+
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Float
 from sqlalchemy.dialects.postgresql import ENUM
 from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy import text
 
 Base = declarative_base()
 
@@ -12,9 +15,9 @@ class Players(Base):
     __tablename__ = 'players'
     id = Column(Integer, primary_key=True)
     name = Column(String, unique=True)
-    password = Column(String)
-    rating = Column(Float)
-    registration_date = Column(DateTime)
+    password_hash = Column(String)
+    rating = Column(Float, server_default="800")
+    registration_date = Column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
     last_online = Column(DateTime)
 
 

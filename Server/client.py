@@ -21,7 +21,7 @@ class Client:
         self.conn: socket = conn
         self.addr = addr
         self.state: ClientStates = ClientStates.GUEST
-        self.temporary_data_storage: dict[str, str | None] = {
+        self.tmp_data_strg: dict[str, str | None] = {
             "name": None,
             "password": None,
         }
@@ -29,9 +29,12 @@ class Client:
     def is_logged_in(self):
         return self.state == ClientStates.LOGGED_IN
 
+    def is_a_guest(self):
+        return self.state == ClientStates.GUEST
+
     def get_name(self):
         if self.is_logged_in():
-            if self.temporary_data_storage["name"] is not None:
-                return self.temporary_data_storage["name"]
+            if self.tmp_data_strg["name"] is not None:
+                return self.tmp_data_strg["name"]
             raise ValueError(f"Registered user's name is {None}")
         return None

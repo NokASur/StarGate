@@ -6,7 +6,7 @@ from datetime import datetime
 from lib import connection_timeout_reached, acceptable_name, acceptable_password
 from commands import CommandTypes, Command, CommandRoster
 from client import Client, ClientStates
-from Database.database import Database
+from Server.Database.database import Database
 
 HOST = '127.0.0.1'
 PORT = 65432
@@ -77,42 +77,39 @@ class Server:
                         client.conn.sendall(b'Welcome to StarGate Server! Reply with "h" to get command list.')
                         greeting = False
 
-                    # if not client.is_logged_in():
-                    #     client.conn.sendall(b'Please log in first. Alternatively, send "h" to get some help')
-
                     data = str(client.conn.recv(1024).decode()).strip()
 
                     if data:
-                        print("HERE1")
-                        print(
-                            ClientStates.LOGGING_IN_NAME.value <= client.state.value <= ClientStates.REGISTRATION_PASSWORD.value)
-                        print(self.ALL_COMMANDS.command_exists(data))
                         # Handling registration
                         if ClientStates.LOGGING_IN_NAME.value <= client.state.value <= ClientStates.REGISTRATION_PASSWORD_CONFIRMATION.value:
-                            print("HERE2")
                             match client.state:
                                 case ClientStates.LOGGING_IN_NAME:
+                                    client.tmp_data_strg["name"] = data
                                     client.conn.sendall(b'Enter your password')
                                     client.state = ClientStates.LOGGING_IN_PASSWORD
-                                    client.temporary_data_storage["name"] = data
 
                                 case ClientStates.LOGGING_IN_PASSWORD:
-                                    client.temporary_data_storage["password"] = data
-                                    if db.find_user(
-                                            client.temporary_data_storage["name"],
-                                            client.temporary_data_storage["password"]
-                                    ):
-                                        db.create_user_session_into_pool(client.temporary_data_storage["name"])
-                                        client.conn.sendall(
-                                            f"Successfully logged in into"
-                                            f" {client.temporary_data_storage["name"]}'s account.")
-                                        client.state = ClientStates.LOGGED_IN
+                                    client.tmp_data_strg["password"] = data
+                                    error = db.find_user_for_login(
+                                        client.tmp_data_strg["name"],
+                                        client.tmp_data_strg["password"]
+                                    )
+                                    if error:
+                                        client.conn.sendall(f'{error}'.encode())
+                                        client.state = ClientStates.GUEST
+                                        self.clean_temporary_client_data(client=client)
+                                        continue
+                                    db.create_user_session_into_pool(client.tmp_data_strg["name"])
+                                    client.conn.sendall(
+                                        f"Successfully logged in into"
+                                        f" {client.tmp_data_strg["name"]}'s account.".encode())
+                                    client.state = ClientStates.LOGGED_IN
 
                                 case ClientStates.REGISTRATION_NAME:
                                     if acceptable_name(data):
                                         client.conn.sendall(b'Enter your password')
                                         client.state = ClientStates.REGISTRATION_PASSWORD
-                                        client.temporary_data_storage["name"] = data
+                                        client.tmp_data_strg["name"] = data
                                     else:
                                         client.conn.sendall(b'Unacceptable name, try again')
 
@@ -120,16 +117,29 @@ class Server:
                                     if acceptable_password(data):
                                         client.conn.sendall(b'Repeat your password')
                                         client.state = ClientStates.REGISTRATION_PASSWORD_CONFIRMATION
-                                        client.temporary_data_storage["password"] = data
+                                        client.tmp_data_strg["password"] = data
                                     else:
                                         client.conn.sendall(b'Unacceptable password, try again')
 
                                 case ClientStates.REGISTRATION_PASSWORD_CONFIRMATION:
-                                    print(f"data: {data}, pswrd: {client.temporary_data_storage['password']}")
-                                    if data == client.temporary_data_storage['password']:
-                                        client.conn.sendall(b'Registration complete.')
-                                        db.create_user_session_into_pool(client.temporary_data_storage["name"])
+                                    print(f"data: {data}, pswrd: {client.tmp_data_strg['password']}")
+                                    if data == client.tmp_data_strg['password']:
+                                        print("here")
+                                        error = db.insert_user(
+                                            client.tmp_data_strg["name"],
+                                            client.tmp_data_strg["password"]
+                                        )
+                                        print(f"error: {error}")
+                                        if error:
+                                            client.conn.sendall(f'{error}'.encode())
+                                            client.state = ClientStates.GUEST
+                                            self.clean_temporary_client_data(client=client)
+                                            continue
+                                        print("here10")
+                                        db.create_user_session_into_pool(client.tmp_data_strg["name"])
                                         client.state = ClientStates.LOGGED_IN
+                                        client.conn.sendall(b'Registration complete.')
+
                                     else:
                                         client.conn.sendall(
                                             b'Passwords do not match. Enter your password from scratch.')
@@ -137,7 +147,6 @@ class Server:
 
                         # Handling commands
                         elif self.ALL_COMMANDS.command_exists(data):
-                            print("HERE3")
                             match self.ALL_COMMANDS.command_type(data):
                                 case CommandTypes.HELP_COMMAND:
                                     print(f"Help requested by {client.addr}.")
@@ -160,14 +169,24 @@ class Server:
                                         )
 
                                 case CommandTypes.REGISTER_COMMAND:
-                                    client.conn.sendall(b'Enter your username')
-                                    client.state = ClientStates.REGISTRATION_NAME
-                                    # DB
+                                    if client.is_a_guest():
+                                        client.conn.sendall(b'Enter your username')
+                                        client.state = ClientStates.REGISTRATION_NAME
+                                    else:
+                                        client.conn.sendall(
+                                            b"Registered users have to exit current account first.\n"
+                                            b"Use 'lgt' to logout."
+                                        )
 
                                 case CommandTypes.LOGIN_COMMAND:
-                                    client.conn.sendall(b'Enter your username')
-                                    client.state = ClientStates.LOGGING_IN_NAME
-                                    # DB
+                                    if client.is_a_guest():
+                                        client.conn.sendall(b'Enter your username')
+                                        client.state = ClientStates.LOGGING_IN_NAME
+                                    else:
+                                        client.conn.sendall(
+                                            b"Registered users have to exit current account first.\n"
+                                            b"Use 'lgt' to logout"
+                                        )
 
                                 case CommandTypes.ADDITIONAL_COMMAND:
                                     client.conn.sendall("How did you get here")
@@ -176,9 +195,7 @@ class Server:
                                 case _:
                                     client.conn.sendall(b"Invalid command!")
                         else:
-                            print("HERE4")
                             client.conn.sendall(b'Invalid command!')
-                        print("HERE5")
                     time.sleep(0.2)
 
         except Exception as e:
@@ -187,7 +204,7 @@ class Server:
         finally:
             self.clients.discard(client)
             self.matchmaking_clients.discard(client)
-            db.session_pool.pop(client.temporary_data_storage["name"], None)
+            db.session_pool.pop(client.tmp_data_strg["name"], None)
             print(f"Connection with {client.addr} closed")
 
     def matchmaking_loop(self):
@@ -209,3 +226,6 @@ class Server:
         )
         self.matchmaking_thread.start()
 
+    @staticmethod
+    def clean_temporary_client_data(client: Client):
+        client.tmp_data_strg.clear()
