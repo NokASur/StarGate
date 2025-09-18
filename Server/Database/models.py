@@ -37,6 +37,7 @@ class Maps(Base):
     name = Column(String, unique=True)
     creation_date = Column(DateTime)
     map_tiles = Column(String)
+    player_count = Column(Integer)
 
 
 class PlayerGames(Base):

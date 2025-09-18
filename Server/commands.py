@@ -3,6 +3,7 @@ from enum import Enum
 
 class CommandTypes(Enum):
     HELP_COMMAND = "HELP_COMMAND"
+    STATE_COMMAND = "STATE_COMMAND"
     QUIT_COMMAND = "QUIT_COMMAND"
     MATCHMAKING_COMMAND = "MATCHMAKING_COMMAND"
     REGISTER_COMMAND = "REGISTER_COMMAND"
@@ -12,9 +13,10 @@ class CommandTypes(Enum):
 
 
 class Command:
-    def __init__(self, cmd_type: CommandTypes, commands: set[str]):
+    def __init__(self, cmd_type: CommandTypes, command_variants: set[str], help_text: str = "No help provided"):
         self.cmd_type = cmd_type
-        self.commands = commands
+        self.commands = command_variants
+        self.help = f"{cmd_type.value} : {command_variants} : {help_text}"
 
 
 class CommandRoster:
@@ -27,16 +29,53 @@ class CommandRoster:
         }
 
     def command_exists(self, command: str) -> bool:
-        print(command)
-        print("____")
         return command in self.command_dict.keys()
 
     def command_type(self, command: str) -> CommandTypes:
         return self.command_dict[command]
 
-    def get_all_commands_help(self):
-        help_text = ""
-        for command in self.command_dict:
-            # RE DO: CLARIFY COMMANDS (Remake class)
-            help_text += command + "\n"
-        return help_text
+
+server_command_roster = CommandRoster(
+    [
+        Command(
+            CommandTypes.HELP_COMMAND,
+            {'help', 'h'},
+            "Prints all available commands from your current state."
+        ),
+        Command(
+            CommandTypes.STATE_COMMAND,
+            {'state', 'st'},
+            "Prints your current state."
+        ),
+        Command(
+            CommandTypes.QUIT_COMMAND,
+            {'exit', 'quit', 'q'},
+            "Closes connection to the server."
+        ),
+        Command(
+            CommandTypes.MATCHMAKING_COMMAND,
+            {'matchmaking', 'mm'},
+            "Puts you in a matchmaking queue."
+        ),
+        Command(
+            CommandTypes.REGISTER_COMMAND,
+            {'register', 'reg'},
+            "Starts a registration procedure."
+        ),
+        Command(
+            CommandTypes.LOGIN_COMMAND,
+            {'login', 'lgn'},
+            "Starts a login procedure."
+        ),
+        Command(
+            CommandTypes.LOGOUT_COMMAND,
+            {'logout', 'lgt'},
+            "Logs you out of your account."
+        ),
+        Command(
+            CommandTypes.ADDITIONAL_COMMAND,
+            {'placeholder'},
+            "Placeholder."
+        )
+    ]
+)

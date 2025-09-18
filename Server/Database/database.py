@@ -52,9 +52,7 @@ class Database:
         print(f"Logging into account {name}: Successfully logged in")
 
     def insert_user(self, name: str, password: str) -> str | None:
-        print("here1")
         existing_user = self.find_user_by_name(name)
-        print("here2")
         if existing_user:
             return "User already exists"
 

@@ -4,7 +4,7 @@ import time
 
 from datetime import datetime
 from lib import connection_timeout_reached, acceptable_name, acceptable_password
-from commands import CommandTypes, Command, CommandRoster
+from commands import CommandTypes, Command, CommandRoster, server_command_roster
 from client import Client, ClientStates
 from Server.Database.database import Database
 
@@ -14,17 +14,7 @@ PORT = 65432
 
 class Server:
     def __init__(self, host=HOST, port=PORT):
-        self.ALL_COMMANDS: CommandRoster = CommandRoster(
-            [
-                Command(CommandTypes.HELP_COMMAND, {'help', 'h'}),
-                Command(CommandTypes.QUIT_COMMAND, {'exit', 'quit', 'q'}),
-                Command(CommandTypes.MATCHMAKING_COMMAND, {'matchmaking', 'mm'}),
-                Command(CommandTypes.REGISTER_COMMAND, {'register', 'reg'}),
-                Command(CommandTypes.LOGIN_COMMAND, {'login', 'lgn'}),
-                Command(CommandTypes.LOGOUT_COMMAND, {'logout', 'lgt'}),
-                Command(CommandTypes.ADDITIONAL_COMMAND, {'placeholder'})
-            ]
-        )
+        self.ALL_COMMANDS: CommandRoster = server_command_roster
 
         self.HOST = host
         self.PORT = port
@@ -57,7 +47,8 @@ class Server:
                 print(f"Active connections: {len(self.clients)}\n")
 
     def send_help(self, client: Client):
-        help_text = self.ALL_COMMANDS.get_all_commands_help()
+        help_text = client.get_all_available_commands_help(self.ALL_COMMANDS)
+        # help_text = self.ALL_COMMANDS.get_all_commands_help()
         client.conn.sendall(help_text.encode())
 
     def handle_client(self, client: Client, db: Database) -> None:
@@ -95,7 +86,7 @@ class Server:
                                         client.tmp_data_strg["password"]
                                     )
                                     if error:
-                                        client.conn.sendall(f'{error}'.encode())
+                                        client.conn.sendall(f'logging failure: {error}'.encode())
                                         client.state = ClientStates.GUEST
                                         self.clean_temporary_client_data(client=client)
                                         continue
@@ -124,18 +115,15 @@ class Server:
                                 case ClientStates.REGISTRATION_PASSWORD_CONFIRMATION:
                                     print(f"data: {data}, pswrd: {client.tmp_data_strg['password']}")
                                     if data == client.tmp_data_strg['password']:
-                                        print("here")
                                         error = db.insert_user(
                                             client.tmp_data_strg["name"],
                                             client.tmp_data_strg["password"]
                                         )
-                                        print(f"error: {error}")
                                         if error:
-                                            client.conn.sendall(f'{error}'.encode())
+                                            client.conn.sendall(f'registration failure: {error}'.encode())
                                             client.state = ClientStates.GUEST
                                             self.clean_temporary_client_data(client=client)
                                             continue
-                                        print("here10")
                                         db.create_user_session_into_pool(client.tmp_data_strg["name"])
                                         client.state = ClientStates.LOGGED_IN
                                         client.conn.sendall(b'Registration complete.')
@@ -147,53 +135,73 @@ class Server:
 
                         # Handling commands
                         elif self.ALL_COMMANDS.command_exists(data):
-                            match self.ALL_COMMANDS.command_type(data):
-                                case CommandTypes.HELP_COMMAND:
-                                    print(f"Help requested by {client.addr}.")
-                                    self.send_help(client)
+                            command_type = self.ALL_COMMANDS.command_type(data)
+                            if client.command_available(command_type):
+                                match command_type:
+                                    case CommandTypes.HELP_COMMAND:
+                                        print(f"Help requested by {client.addr}.")
+                                        self.send_help(client)
 
-                                case CommandTypes.QUIT_COMMAND:
-                                    print(f"Connection closure requested by {client.addr}.")
-                                    break
-
-                                case CommandTypes.MATCHMAKING_COMMAND:
-                                    if client.is_logged_in():
-                                        print(f"Matchmaking request from {client.addr}, Name '{client.get_name()}'.")
-                                        self.matchmaking_clients.add(client)
-                                        print(self.matchmaking_clients)
-                                        client.conn.sendall(b"Searching")
-                                    else:
+                                    case CommandTypes.STATE_COMMAND:
                                         client.conn.sendall(
-                                            b"Unregistered users cannot use matchmaking. "
-                                            b"Please register."
+                                            f"Your current state description: {client.state.value.description}".encode()
                                         )
 
-                                case CommandTypes.REGISTER_COMMAND:
-                                    if client.is_a_guest():
-                                        client.conn.sendall(b'Enter your username')
-                                        client.state = ClientStates.REGISTRATION_NAME
-                                    else:
+                                    case CommandTypes.QUIT_COMMAND:
+                                        print(f"Connection closure requested by {client.addr}.")
+                                        break
+
+                                    case CommandTypes.MATCHMAKING_COMMAND:
+                                        if client.is_logged_in():
+                                            print(
+                                                f"Matchmaking request from {client.addr}, Name '{client.get_name()}'.")
+                                            self.matchmaking_clients.add(client)
+                                            print(self.matchmaking_clients)
+                                            client.conn.sendall(b"Searching")
+                                        else:
+                                            client.conn.sendall(
+                                                b"Unregistered users cannot use matchmaking. "
+                                                b"Please register."
+                                            )
+
+                                    case CommandTypes.REGISTER_COMMAND:
+                                        if client.is_a_guest():
+                                            client.conn.sendall(b'Enter your username')
+                                            client.state = ClientStates.REGISTRATION_NAME
+                                        else:
+                                            client.conn.sendall(
+                                                b"Registered users have to exit current account first.\n"
+                                                b"Use 'lgt' to logout."
+                                            )
+
+                                    case CommandTypes.LOGIN_COMMAND:
+                                        if client.is_a_guest():
+                                            client.conn.sendall(b'Enter your username')
+                                            client.state = ClientStates.LOGGING_IN_NAME
+                                        else:
+                                            client.conn.sendall(
+                                                b"Registered users have to exit current account first.\n"
+                                                b"Use 'lgt' to logout"
+                                            )
+                                    case CommandTypes.LOGOUT_COMMAND:
+                                        self.clients.discard(client)
+                                        self.matchmaking_clients.discard(client)
+                                        db.session_pool.pop(client.tmp_data_strg["name"], None)
+                                        print(f"User: {client.tmp_data_strg['name']} logged out")
+                                        client.state = ClientStates.GUEST
+                                        client.conn.sendall(b"Successfully logged out.")
+
+                                    case CommandTypes.ADDITIONAL_COMMAND:
+                                        client.conn.sendall(b"How did you get here")
+                                        pass
+
+                                    case _:
                                         client.conn.sendall(
-                                            b"Registered users have to exit current account first.\n"
-                                            b"Use 'lgt' to logout."
+                                            b"Invalid command type.\n"
+                                            b"This is a server problem, please report"
                                         )
-
-                                case CommandTypes.LOGIN_COMMAND:
-                                    if client.is_a_guest():
-                                        client.conn.sendall(b'Enter your username')
-                                        client.state = ClientStates.LOGGING_IN_NAME
-                                    else:
-                                        client.conn.sendall(
-                                            b"Registered users have to exit current account first.\n"
-                                            b"Use 'lgt' to logout"
-                                        )
-
-                                case CommandTypes.ADDITIONAL_COMMAND:
-                                    client.conn.sendall("How did you get here")
-                                    pass
-
-                                case _:
-                                    client.conn.sendall(b"Invalid command!")
+                            else:
+                                client.conn.sendall(b'Command unavailable from here')
                         else:
                             client.conn.sendall(b'Invalid command!')
                     time.sleep(0.2)
@@ -209,13 +217,16 @@ class Server:
 
     def matchmaking_loop(self):
         while True:
-            print("Matchmaking loop")
+            # print("Matchmaking loop")
             while len(self.matchmaking_clients) >= 2:
                 print("Matchmaking game found")
                 player1: Client = self.matchmaking_clients.pop()
                 player2: Client = self.matchmaking_clients.pop()
-                player1.conn.sendall(b'Match found')
-                player2.conn.sendall(b'Match found')
+                player1.state = ClientStates.GAME_LOBBY
+                player2.state = ClientStates.GAME_LOBBY
+
+                player1.conn.sendall(b'Match found, entering lobby')
+                player2.conn.sendall(b'Match found, entering lobby')
             time.sleep(1)
 
     def start_matchmaking(self):
