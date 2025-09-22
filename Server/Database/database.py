@@ -68,3 +68,38 @@ class Database:
         }
         self.main_session.execute(insert_query, insert_query_params)
         self.main_session.commit()
+
+    def create_lobby_from_user(self, user: str):
+        insert_query = text("""
+            WITH new_game as(
+                INSERT INTO games DEFAULT VALUES
+                RETURNING id
+            ),
+            player as(
+                SELECT id FROM players WHERE name = :user
+            )
+            INSERT INTO player_games (game_id, player_id)
+            SELECT new_game.id, player.id
+            FROM new_game, player
+        """)
+        params = {"user": user}
+        self.main_session.execute(insert_query, params)
+        self.main_session.commit()
+
+    def get_lobbies(self):
+        select_query = text("""
+            SELECT * FROM games WHERE state = 'Lobby'
+        """)
+        lobbies = self.main_session.execute(select_query).fetchall()
+        return lobbies
+
+    def bind_user_to_lobby(self, username: str, lobby_id: int):
+        insert_query = text("""
+            INSERT INTO player_games (game_id, player_id)
+            SELECT :lobby_id, id
+            FROM players 
+            WHERE name = :username
+        """)
+        params = {"username": username, "lobby_id": lobby_id}
+        self.main_session.execute(insert_query, params)
+        self.main_session.commit()

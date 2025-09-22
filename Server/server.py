@@ -71,6 +71,8 @@ class Server:
                     data = str(client.conn.recv(1024).decode()).strip()
 
                     if data:
+                        command = data.split(' ')[0]
+                        params = data.split(' ')[1:]
                         # Handling registration
                         if ClientStates.LOGGING_IN_NAME.value <= client.state.value <= ClientStates.REGISTRATION_PASSWORD_CONFIRMATION.value:
                             match client.state:
@@ -97,24 +99,27 @@ class Server:
                                     client.state = ClientStates.LOGGED_IN
 
                                 case ClientStates.REGISTRATION_NAME:
-                                    if acceptable_name(data):
+                                    name = command
+                                    if acceptable_name(name):
                                         client.conn.sendall(b'Enter your password')
                                         client.state = ClientStates.REGISTRATION_PASSWORD
-                                        client.tmp_data_strg["name"] = data
+                                        client.tmp_data_strg["name"] = name
                                     else:
                                         client.conn.sendall(b'Unacceptable name, try again')
 
                                 case ClientStates.REGISTRATION_PASSWORD:
-                                    if acceptable_password(data):
+                                    password = command
+                                    if acceptable_password(password):
                                         client.conn.sendall(b'Repeat your password')
                                         client.state = ClientStates.REGISTRATION_PASSWORD_CONFIRMATION
-                                        client.tmp_data_strg["password"] = data
+                                        client.tmp_data_strg["password"] = password
                                     else:
                                         client.conn.sendall(b'Unacceptable password, try again')
 
                                 case ClientStates.REGISTRATION_PASSWORD_CONFIRMATION:
-                                    print(f"data: {data}, pswrd: {client.tmp_data_strg['password']}")
-                                    if data == client.tmp_data_strg['password']:
+                                    password = command
+                                    print(f"data: {password}, pswrd: {client.tmp_data_strg['password']}")
+                                    if password == client.tmp_data_strg['password']:
                                         error = db.insert_user(
                                             client.tmp_data_strg["name"],
                                             client.tmp_data_strg["password"]
@@ -134,8 +139,8 @@ class Server:
                                         client.state = ClientStates.REGISTRATION_PASSWORD
 
                         # Handling commands
-                        elif self.ALL_COMMANDS.command_exists(data):
-                            command_type = self.ALL_COMMANDS.command_type(data)
+                        elif self.ALL_COMMANDS.command_exists(command):
+                            command_type = self.ALL_COMMANDS.command_type(command)
                             if client.command_available(command_type):
                                 match command_type:
                                     case CommandTypes.HELP_COMMAND:
@@ -191,8 +196,49 @@ class Server:
                                         client.state = ClientStates.GUEST
                                         client.conn.sendall(b"Successfully logged out.")
 
-                                    case CommandTypes.ADDITIONAL_COMMAND:
-                                        client.conn.sendall(b"How did you get here")
+                                    case CommandTypes.CREATE_LOBBY_COMMAND:
+                                        db.create_lobby_from_user(client.tmp_data_strg["name"])
+                                        client.state = ClientStates.GAME_LOBBY
+                                        client.conn.sendall(b"Created and entered lobby.")
+
+                                    case CommandTypes.GET_LOBBIES_COMMAND:
+                                        lobbies = db.get_lobbies()
+                                        reply = "Available lobbies:\n"
+                                        for lobby in lobbies:
+                                            reply += (
+                                                f"Id: {lobby.id}, "
+                                                f"type:{lobby.type}, "
+                                                f"state: {lobby.state}, "
+                                                f"open: {lobby.open}\n"
+                                            )
+                                        client.conn.sendall(reply.encode())
+
+                                    case CommandTypes.SELECT_LOBBY_COMMAND:
+                                        for ind in range(0, len(params)):
+                                            param = params[ind]
+                                            match param:
+                                                case "-id":
+                                                    ind += 1
+                                                    try:
+                                                        lobby_id = int(params[ind])
+                                                        db.bind_user_to_lobby(
+                                                            username=client.tmp_data_strg['name'],
+                                                            lobby_id=lobby_id
+                                                        )
+                                                        client.state = ClientStates.GAME_LOBBY
+                                                        client.conn.sendall(
+                                                            f"Successfully entered lobby with id:{lobby_id}".encode()
+                                                        )
+                                                    except ValueError:
+                                                        reply = f"Incorrect value for parameter {param}: {params[ind]}"
+                                                        client.conn.sendall(reply.encode())
+                                                    except Exception as e:
+                                                        reply = repr(e)
+                                                        client.conn.sendall(reply.encode())
+                                                case _:
+                                                    client.conn.sendall(b"Incorrect parameters")
+
+                                    case CommandTypes.CHAT_COMMAND:
                                         pass
 
                                     case _:

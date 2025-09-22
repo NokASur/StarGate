@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Float
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Float, Boolean
 from sqlalchemy.dialects.postgresql import ENUM
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import text
@@ -8,7 +8,7 @@ from sqlalchemy import text
 Base = declarative_base()
 
 game_type_enum = ENUM("Test", name="game_type_enum")
-game_state_enum = ENUM("Lobby", "Playing", "Finished", name="game_state_enum")
+game_state_enum = ENUM("Lobby", "Playing", "Finished", "Aborted", name="game_state_enum")
 
 
 class Players(Base):
@@ -24,11 +24,13 @@ class Players(Base):
 class Games(Base):
     __tablename__ = 'games'
     id = Column(Integer, primary_key=True)
-    map_id = Column(Integer, ForeignKey('maps.id'))
-    type = Column(game_type_enum, default="Test")
-    state = Column(game_state_enum, default="Lobby")
-    start_time = Column(DateTime)
-    end_time = Column(DateTime)
+    map_id = Column(Integer, ForeignKey('maps.id'), server_default=None)
+    type = Column(game_type_enum, server_default="Test")
+    state = Column(game_state_enum, server_default="Lobby")
+    password_hash = Column(String, server_default=None)
+    start_time = Column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
+    end_time = Column(DateTime, server_default=None)
+    open = Column(Boolean, server_default='false')
 
 
 class Maps(Base):

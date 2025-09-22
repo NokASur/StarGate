@@ -9,7 +9,10 @@ class CommandTypes(Enum):
     REGISTER_COMMAND = "REGISTER_COMMAND"
     LOGIN_COMMAND = "LOGIN_COMMAND"
     LOGOUT_COMMAND = "LOGOUT_COMMAND"
-    ADDITIONAL_COMMAND = "ADDITIONAL_COMMAND"
+    CREATE_LOBBY_COMMAND = "CREATE_LOBBY_COMMAND"
+    GET_LOBBIES_COMMAND = "GET_LOBBIES_COMMAND"
+    SELECT_LOBBY_COMMAND = "SELECT_LOBBY_COMMAND"
+    CHAT_COMMAND = "CHAT_COMMAND"
 
 
 class Command:
@@ -73,9 +76,24 @@ server_command_roster = CommandRoster(
             "Logs you out of your account."
         ),
         Command(
-            CommandTypes.ADDITIONAL_COMMAND,
-            {'placeholder'},
-            "Placeholder."
+            CommandTypes.CREATE_LOBBY_COMMAND,
+            {'create_lobby', 'crlb'},
+            "Creates a customizable lobby."
+        ),
+        Command(
+            CommandTypes.GET_LOBBIES_COMMAND,
+            {'get_lobbies', 'lobbies', 'lob'},
+            "Returns a list of all lobbies available."
+        ),
+        Command(
+            CommandTypes.SELECT_LOBBY_COMMAND,
+            {'select_lobby', 'select', 'selob', 's'},
+            "Selecting a lobby."
+        ),
+        Command(
+            CommandTypes.CHAT_COMMAND,
+            {'chat', 'ch', 'text', 't'},
+            "Send in-chat message."
         )
     ]
 )

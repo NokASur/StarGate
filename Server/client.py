@@ -47,11 +47,20 @@ class ClientStates(Enum):
             CommandTypes.LOGOUT_COMMAND,
             CommandTypes.MATCHMAKING_COMMAND,
             CommandTypes.QUIT_COMMAND,
+            CommandTypes.CREATE_LOBBY_COMMAND,
+            CommandTypes.GET_LOBBIES_COMMAND,
+            CommandTypes.SELECT_LOBBY_COMMAND,
         ],
         "Logged in user.\n"
     )
 
-    GAME_LOBBY = State(201, [], "In lobby.\n")  # add
+    GAME_LOBBY = State(201,
+                       [
+                           CommandTypes.HELP_COMMAND,
+                           CommandTypes.STATE_COMMAND,
+                           CommandTypes.CHAT_COMMAND,
+                       ],
+                       "In lobby.\n")  # add
     IN_GAME = State(202, [], "In game.\n")  # add
 
 
