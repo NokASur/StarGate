@@ -103,3 +103,37 @@ class Database:
         params = {"username": username, "lobby_id": lobby_id}
         self.main_session.execute(insert_query, params)
         self.main_session.commit()
+
+    def kick_user_from_lobbies(self, username: str):
+        delete_query = text("""
+            DELETE FROM player_games 
+            WHERE player_id = (SELECT id FROM players WHERE name = :username)
+        """)
+        params = {"username": username}
+        self.main_session.execute(delete_query, params)
+        self.main_session.commit()
+
+    def abandon_empty_lobbies(self) -> int:
+        update_query = text("""
+            UPDATE games
+            SET state = :state
+            WHERE id NOT IN (
+                SELECT game_id FROM player_games
+            ) AND games.state = 'Lobby'
+            RETURNING id
+        """)
+        params = {"state": "Aborted"}
+        updated_count = len(self.main_session.execute(update_query, params).fetchall())
+        self.main_session.commit()
+        return updated_count
+
+    def save_message_to_current_lobby(self, username: str, message: str):
+        insert_query = text("""
+            INSERT INTO game_chats (game_id, player_id, message, timestamp)
+            SELECT player_games.game_id, p.id, :message, CURRENT_TIMESTAMP
+            FROM (SELECT id FROM players WHERE name = :username) as p
+            LEFT JOIN player_games ON p.id = player_games.player_id
+        """)
+        params = {"username": username, "message": message}
+        self.main_session.execute(insert_query, params)
+        self.main_session.commit()

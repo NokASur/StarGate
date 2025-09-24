@@ -1,5 +1,3 @@
-from datetime import datetime
-
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Float, Boolean
 from sqlalchemy.dialects.postgresql import ENUM
 from sqlalchemy.ext.declarative import declarative_base
@@ -18,7 +16,7 @@ class Players(Base):
     password_hash = Column(String)
     rating = Column(Float, server_default="800")
     registration_date = Column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
-    last_online = Column(DateTime)
+    last_online = Column(DateTime, server_default=None)
 
 
 class Games(Base):
@@ -47,3 +45,12 @@ class PlayerGames(Base):
     id = Column(Integer, primary_key=True)
     game_id = Column(Integer, ForeignKey('games.id'))
     player_id = Column(Integer, ForeignKey('players.id'))
+
+
+class GameChats(Base):
+    __tablename__ = 'game_chats'
+    id = Column(Integer, primary_key=True)
+    game_id = Column(Integer, ForeignKey('games.id'))
+    player_id = Column(Integer, ForeignKey('players.id'))
+    message = Column(String)
+    timestamp = Column(DateTime, server_default=text('CURRENT_TIMESTAMP'))

@@ -59,6 +59,7 @@ class ClientStates(Enum):
                            CommandTypes.HELP_COMMAND,
                            CommandTypes.STATE_COMMAND,
                            CommandTypes.CHAT_COMMAND,
+                           CommandTypes.LEAVE_COMMAND,
                        ],
                        "In lobby.\n")  # add
     IN_GAME = State(202, [], "In game.\n")  # add
@@ -73,6 +74,7 @@ class Client:
             "name": None,
             "password": None,
         }
+        self.heartbeat = True
 
     def is_logged_in(self):
         return self.state.value >= ClientStates.LOGGED_IN.value

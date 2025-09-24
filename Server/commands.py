@@ -13,6 +13,7 @@ class CommandTypes(Enum):
     GET_LOBBIES_COMMAND = "GET_LOBBIES_COMMAND"
     SELECT_LOBBY_COMMAND = "SELECT_LOBBY_COMMAND"
     CHAT_COMMAND = "CHAT_COMMAND"
+    LEAVE_COMMAND = "LEAVE_COMMAND"
 
 
 class Command:
@@ -94,6 +95,11 @@ server_command_roster = CommandRoster(
             CommandTypes.CHAT_COMMAND,
             {'chat', 'ch', 'text', 't'},
             "Send in-chat message."
+        ),
+        Command(
+            CommandTypes.LEAVE_COMMAND,
+            {'leave', 'l'},
+            "Leave a lobby."
         )
     ]
 )

@@ -4,7 +4,7 @@ import time
 
 from datetime import datetime
 from lib import connection_timeout_reached, acceptable_name, acceptable_password
-from commands import CommandTypes, Command, CommandRoster, server_command_roster
+from commands import CommandTypes, CommandRoster, server_command_roster
 from client import Client, ClientStates
 from Server.Database.database import Database
 
@@ -31,12 +31,14 @@ class Server:
             s.listen()
             print(f"Server listening on {self.HOST}:{self.PORT}\n")
             db = Database()
-            self.start_matchmaking()
+            self.start_matchmaking(db)
+            self.start_empty_lobbies_abandonment(db)
             print(f"Matchmaking online")
-
             while True:
                 conn, addr = s.accept()
+                print(b"test1")
                 client = Client(conn, addr)
+                print(b"test2")
                 self.clients.add(client)
                 client_thread = threading.Thread(
                     target=self.handle_client,
@@ -54,216 +56,231 @@ class Server:
     def handle_client(self, client: Client, db: Database) -> None:
         print(f'Connected by {client.addr} to {self.HOST}:{self.PORT}\n')
         connection_timestamp = datetime.now()
+        self.start_heartbeat(client)
         greeting = True
         try:
             with (client.conn):
                 while True:
                     if connection_timeout_reached(connection_timestamp):
-                        print(f"Connection timeout reached for {client.addr}.\n")
-                        client.conn.sendall('q'.encode())
-                        self.clients.remove(client)
+                        self.cleanup_client(client, db)
+                        print(f"Connection timeout reached for {client.tmp_data_strg['name']}.\n")
                         break
+
+                    if not client.heartbeat:
+                        self.cleanup_client(client, db)
+                        print(f"Heartbeat check failed for client {client.tmp_data_strg['name']}.\n")
 
                     if greeting:
                         client.conn.sendall(b'Welcome to StarGate Server! Reply with "h" to get command list.')
                         greeting = False
+                    try:
+                        data = str(client.conn.recv(1024).decode()).strip()
 
-                    data = str(client.conn.recv(1024).decode()).strip()
-
-                    if data:
-                        command = data.split(' ')[0]
-                        params = data.split(' ')[1:]
-                        # Handling registration
-                        if ClientStates.LOGGING_IN_NAME.value <= client.state.value <= ClientStates.REGISTRATION_PASSWORD_CONFIRMATION.value:
-                            match client.state:
-                                case ClientStates.LOGGING_IN_NAME:
-                                    client.tmp_data_strg["name"] = data
-                                    client.conn.sendall(b'Enter your password')
-                                    client.state = ClientStates.LOGGING_IN_PASSWORD
-
-                                case ClientStates.LOGGING_IN_PASSWORD:
-                                    client.tmp_data_strg["password"] = data
-                                    error = db.find_user_for_login(
-                                        client.tmp_data_strg["name"],
-                                        client.tmp_data_strg["password"]
-                                    )
-                                    if error:
-                                        client.conn.sendall(f'logging failure: {error}'.encode())
-                                        client.state = ClientStates.GUEST
-                                        self.clean_temporary_client_data(client=client)
-                                        continue
-                                    db.create_user_session_into_pool(client.tmp_data_strg["name"])
-                                    client.conn.sendall(
-                                        f"Successfully logged in into"
-                                        f" {client.tmp_data_strg["name"]}'s account.".encode())
-                                    client.state = ClientStates.LOGGED_IN
-
-                                case ClientStates.REGISTRATION_NAME:
-                                    name = command
-                                    if acceptable_name(name):
+                        if data:
+                            command = data.split(' ')[0]
+                            params = data.split(' ')[1:]
+                            # Handling registration
+                            if ClientStates.LOGGING_IN_NAME.value <= client.state.value <= ClientStates.REGISTRATION_PASSWORD_CONFIRMATION.value:
+                                match client.state:
+                                    case ClientStates.LOGGING_IN_NAME:
+                                        client.tmp_data_strg["name"] = data
                                         client.conn.sendall(b'Enter your password')
-                                        client.state = ClientStates.REGISTRATION_PASSWORD
-                                        client.tmp_data_strg["name"] = name
-                                    else:
-                                        client.conn.sendall(b'Unacceptable name, try again')
+                                        client.state = ClientStates.LOGGING_IN_PASSWORD
 
-                                case ClientStates.REGISTRATION_PASSWORD:
-                                    password = command
-                                    if acceptable_password(password):
-                                        client.conn.sendall(b'Repeat your password')
-                                        client.state = ClientStates.REGISTRATION_PASSWORD_CONFIRMATION
-                                        client.tmp_data_strg["password"] = password
-                                    else:
-                                        client.conn.sendall(b'Unacceptable password, try again')
-
-                                case ClientStates.REGISTRATION_PASSWORD_CONFIRMATION:
-                                    password = command
-                                    print(f"data: {password}, pswrd: {client.tmp_data_strg['password']}")
-                                    if password == client.tmp_data_strg['password']:
-                                        error = db.insert_user(
+                                    case ClientStates.LOGGING_IN_PASSWORD:
+                                        client.tmp_data_strg["password"] = data
+                                        error = db.find_user_for_login(
                                             client.tmp_data_strg["name"],
                                             client.tmp_data_strg["password"]
                                         )
                                         if error:
-                                            client.conn.sendall(f'registration failure: {error}'.encode())
+                                            client.conn.sendall(f'logging failure: {error}'.encode())
                                             client.state = ClientStates.GUEST
                                             self.clean_temporary_client_data(client=client)
                                             continue
                                         db.create_user_session_into_pool(client.tmp_data_strg["name"])
+                                        client.conn.sendall(
+                                            f"Successfully logged in into"
+                                            f" {client.tmp_data_strg["name"]}'s account.".encode())
                                         client.state = ClientStates.LOGGED_IN
-                                        client.conn.sendall(b'Registration complete.')
 
-                                    else:
-                                        client.conn.sendall(
-                                            b'Passwords do not match. Enter your password from scratch.')
-                                        client.state = ClientStates.REGISTRATION_PASSWORD
+                                    case ClientStates.REGISTRATION_NAME:
+                                        name = command
+                                        if acceptable_name(name):
+                                            client.conn.sendall(b'Enter your password')
+                                            client.state = ClientStates.REGISTRATION_PASSWORD
+                                            client.tmp_data_strg["name"] = name
+                                        else:
+                                            client.conn.sendall(b'Unacceptable name, try again')
 
-                        # Handling commands
-                        elif self.ALL_COMMANDS.command_exists(command):
-                            command_type = self.ALL_COMMANDS.command_type(command)
-                            if client.command_available(command_type):
-                                match command_type:
-                                    case CommandTypes.HELP_COMMAND:
-                                        print(f"Help requested by {client.addr}.")
-                                        self.send_help(client)
+                                    case ClientStates.REGISTRATION_PASSWORD:
+                                        password = command
+                                        if acceptable_password(password):
+                                            client.conn.sendall(b'Repeat your password')
+                                            client.state = ClientStates.REGISTRATION_PASSWORD_CONFIRMATION
+                                            client.tmp_data_strg["password"] = password
+                                        else:
+                                            client.conn.sendall(b'Unacceptable password, try again')
 
-                                    case CommandTypes.STATE_COMMAND:
-                                        client.conn.sendall(
-                                            f"Your current state description: {client.state.value.description}".encode()
-                                        )
+                                    case ClientStates.REGISTRATION_PASSWORD_CONFIRMATION:
+                                        password = command
+                                        print(f"data: {password}, pswrd: {client.tmp_data_strg['password']}")
+                                        if password == client.tmp_data_strg['password']:
+                                            error = db.insert_user(
+                                                client.tmp_data_strg["name"],
+                                                client.tmp_data_strg["password"]
+                                            )
+                                            if error:
+                                                client.conn.sendall(f'registration failure: {error}'.encode())
+                                                client.state = ClientStates.GUEST
+                                                self.clean_temporary_client_data(client=client)
+                                                continue
+                                            db.create_user_session_into_pool(client.tmp_data_strg["name"])
+                                            client.state = ClientStates.LOGGED_IN
+                                            client.conn.sendall(b'Registration complete.')
 
-                                    case CommandTypes.QUIT_COMMAND:
-                                        print(f"Connection closure requested by {client.addr}.")
-                                        break
-
-                                    case CommandTypes.MATCHMAKING_COMMAND:
-                                        if client.is_logged_in():
-                                            print(
-                                                f"Matchmaking request from {client.addr}, Name '{client.get_name()}'.")
-                                            self.matchmaking_clients.add(client)
-                                            print(self.matchmaking_clients)
-                                            client.conn.sendall(b"Searching")
                                         else:
                                             client.conn.sendall(
-                                                b"Unregistered users cannot use matchmaking. "
-                                                b"Please register."
-                                            )
+                                                b'Passwords do not match. Enter your password from scratch.')
+                                            client.state = ClientStates.REGISTRATION_PASSWORD
 
-                                    case CommandTypes.REGISTER_COMMAND:
-                                        if client.is_a_guest():
-                                            client.conn.sendall(b'Enter your username')
-                                            client.state = ClientStates.REGISTRATION_NAME
-                                        else:
+                            # Handling commands
+                            elif self.ALL_COMMANDS.command_exists(command):
+                                command_type = self.ALL_COMMANDS.command_type(command)
+                                if client.command_available(command_type):
+                                    match command_type:
+                                        case CommandTypes.HELP_COMMAND:
+                                            print(f"Help requested by {client.addr}.")
+                                            self.send_help(client)
+
+                                        case CommandTypes.STATE_COMMAND:
                                             client.conn.sendall(
-                                                b"Registered users have to exit current account first.\n"
-                                                b"Use 'lgt' to logout."
+                                                f"Your current state description: {client.state.value.description}".encode()
                                             )
 
-                                    case CommandTypes.LOGIN_COMMAND:
-                                        if client.is_a_guest():
-                                            client.conn.sendall(b'Enter your username')
-                                            client.state = ClientStates.LOGGING_IN_NAME
-                                        else:
+                                        case CommandTypes.QUIT_COMMAND:
+                                            print(f"Connection closure requested by {client.addr}.")
+                                            break
+
+                                        case CommandTypes.MATCHMAKING_COMMAND:
+                                            if client.is_logged_in():
+                                                print(
+                                                    f"Matchmaking request from {client.addr}, Name '{client.get_name()}'.")
+                                                self.matchmaking_clients.add(client)
+                                                print(self.matchmaking_clients)
+                                                client.conn.sendall(b"Searching")
+                                            else:
+                                                client.conn.sendall(
+                                                    b"Unregistered users cannot use matchmaking. "
+                                                    b"Please register."
+                                                )
+
+                                        case CommandTypes.REGISTER_COMMAND:
+                                            if client.is_a_guest():
+                                                client.conn.sendall(b'Enter your username')
+                                                client.state = ClientStates.REGISTRATION_NAME
+                                            else:
+                                                client.conn.sendall(
+                                                    b"Registered users have to exit current account first.\n"
+                                                    b"Use 'lgt' to logout."
+                                                )
+
+                                        case CommandTypes.LOGIN_COMMAND:
+                                            if client.is_a_guest():
+                                                client.conn.sendall(b'Enter your username')
+                                                client.state = ClientStates.LOGGING_IN_NAME
+                                            else:
+                                                client.conn.sendall(
+                                                    b"Registered users have to exit current account first.\n"
+                                                    b"Use 'lgt' to logout"
+                                                )
+                                        case CommandTypes.LOGOUT_COMMAND:
+                                            self.cleanup_client(client, db)
+                                            print(f"User: {client.tmp_data_strg['name']} logged out")
+                                            client.state = ClientStates.GUEST
+                                            client.conn.sendall(b"Successfully logged out.")
+
+                                        case CommandTypes.CREATE_LOBBY_COMMAND:
+                                            db.create_lobby_from_user(client.tmp_data_strg["name"])
+                                            client.state = ClientStates.GAME_LOBBY
+                                            client.conn.sendall(b"Created and entered lobby.")
+
+                                        case CommandTypes.GET_LOBBIES_COMMAND:
+                                            lobbies = db.get_lobbies()
+                                            reply = "Available lobbies:\n"
+                                            for lobby in lobbies:
+                                                reply += (
+                                                    f"Id: {lobby.id}, "
+                                                    f"type:{lobby.type}, "
+                                                    f"state: {lobby.state}, "
+                                                    f"open: {lobby.open}\n"
+                                                )
+                                            client.conn.sendall(reply.encode())
+
+                                        case CommandTypes.SELECT_LOBBY_COMMAND:
+                                            if len(params) == 0:
+                                                client.conn.sendall(b"No parameters specified")
+                                            ind = 0
+                                            while ind < len(params):
+                                                param = params[ind]
+                                                match param:
+                                                    case "-id":
+                                                        ind += 1
+                                                        try:
+                                                            lobby_id = int(params[ind])
+                                                            db.bind_user_to_lobby(
+                                                                username=client.tmp_data_strg['name'],
+                                                                lobby_id=lobby_id
+                                                            )
+                                                            client.state = ClientStates.GAME_LOBBY
+                                                            client.conn.sendall(
+                                                                f"Successfully entered lobby with id:{lobby_id}".encode()
+                                                            )
+                                                        except ValueError:
+                                                            reply = f"Incorrect value for parameter {param}: {params[ind]}"
+                                                            client.conn.sendall(reply.encode())
+                                                        except Exception as e:
+                                                            reply = repr(e)
+                                                            client.conn.sendall(reply.encode())
+                                                    case _:
+                                                        client.conn.sendall(b"Incorrect parameters")
+                                                ind += 1
+
+                                        case CommandTypes.CHAT_COMMAND:
+                                            message = " ".join(params[:])
+                                            db.save_message_to_current_lobby(client.tmp_data_strg["name"], message)
+                                            client.conn.sendall(f"{message}".encode())
+
+                                        case CommandTypes.LEAVE_COMMAND:
+                                            db.kick_user_from_lobbies(client.tmp_data_strg["name"])
+                                            client.state = ClientStates.LOGGED_IN
+                                            client.conn.sendall(b"You've left the lobby.")
+
+                                        case _:
                                             client.conn.sendall(
-                                                b"Registered users have to exit current account first.\n"
-                                                b"Use 'lgt' to logout"
+                                                b"Invalid command type.\n"
+                                                b"This is a server problem, please report"
                                             )
-                                    case CommandTypes.LOGOUT_COMMAND:
-                                        self.clients.discard(client)
-                                        self.matchmaking_clients.discard(client)
-                                        db.session_pool.pop(client.tmp_data_strg["name"], None)
-                                        print(f"User: {client.tmp_data_strg['name']} logged out")
-                                        client.state = ClientStates.GUEST
-                                        client.conn.sendall(b"Successfully logged out.")
-
-                                    case CommandTypes.CREATE_LOBBY_COMMAND:
-                                        db.create_lobby_from_user(client.tmp_data_strg["name"])
-                                        client.state = ClientStates.GAME_LOBBY
-                                        client.conn.sendall(b"Created and entered lobby.")
-
-                                    case CommandTypes.GET_LOBBIES_COMMAND:
-                                        lobbies = db.get_lobbies()
-                                        reply = "Available lobbies:\n"
-                                        for lobby in lobbies:
-                                            reply += (
-                                                f"Id: {lobby.id}, "
-                                                f"type:{lobby.type}, "
-                                                f"state: {lobby.state}, "
-                                                f"open: {lobby.open}\n"
-                                            )
-                                        client.conn.sendall(reply.encode())
-
-                                    case CommandTypes.SELECT_LOBBY_COMMAND:
-                                        for ind in range(0, len(params)):
-                                            param = params[ind]
-                                            match param:
-                                                case "-id":
-                                                    ind += 1
-                                                    try:
-                                                        lobby_id = int(params[ind])
-                                                        db.bind_user_to_lobby(
-                                                            username=client.tmp_data_strg['name'],
-                                                            lobby_id=lobby_id
-                                                        )
-                                                        client.state = ClientStates.GAME_LOBBY
-                                                        client.conn.sendall(
-                                                            f"Successfully entered lobby with id:{lobby_id}".encode()
-                                                        )
-                                                    except ValueError:
-                                                        reply = f"Incorrect value for parameter {param}: {params[ind]}"
-                                                        client.conn.sendall(reply.encode())
-                                                    except Exception as e:
-                                                        reply = repr(e)
-                                                        client.conn.sendall(reply.encode())
-                                                case _:
-                                                    client.conn.sendall(b"Incorrect parameters")
-
-                                    case CommandTypes.CHAT_COMMAND:
-                                        pass
-
-                                    case _:
-                                        client.conn.sendall(
-                                            b"Invalid command type.\n"
-                                            b"This is a server problem, please report"
-                                        )
+                                else:
+                                    client.conn.sendall(b'Command unavailable from here')
                             else:
-                                client.conn.sendall(b'Command unavailable from here')
-                        else:
-                            client.conn.sendall(b'Invalid command!')
-                    time.sleep(0.2)
+                                client.conn.sendall(b'Invalid command!')
+                        time.sleep(0.2)
+                    except Exception as e:
+                        print(f"Cannot recieve data due to exception: {e}")
+                        break
 
         except Exception as e:
             print(f"Error with client {client.addr}: {e}")
 
         finally:
-            self.clients.discard(client)
-            self.matchmaking_clients.discard(client)
-            db.session_pool.pop(client.tmp_data_strg["name"], None)
+            self.cleanup_client(client, db)
             print(f"Connection with {client.addr} closed")
 
-    def matchmaking_loop(self):
+    def matchmaking_loop(self, db: Database, retry_period=3):
+        # Rewrite to work with db
         while True:
-            # print("Matchmaking loop")
+            print("Matchmaking loop")
             while len(self.matchmaking_clients) >= 2:
                 print("Matchmaking game found")
                 player1: Client = self.matchmaking_clients.pop()
@@ -273,16 +290,57 @@ class Server:
 
                 player1.conn.sendall(b'Match found, entering lobby')
                 player2.conn.sendall(b'Match found, entering lobby')
-            time.sleep(1)
+            time.sleep(retry_period)
 
-    def start_matchmaking(self):
-        self.matchmaking_thread = threading.Thread(
+    def start_matchmaking(self, db: Database):
+        matchmaking_thread = threading.Thread(
             target=self.matchmaking_loop,
-            args=[],
+            args=[db],
             daemon=True
         )
-        self.matchmaking_thread.start()
+        matchmaking_thread.start()
+
+    @staticmethod
+    def abandon_empty_lobbies(db: Database, retry_period=3):
+        while True:
+            lobbies_abandoned = db.abandon_empty_lobbies()
+            print(f"Empty lobbies abandoned: {lobbies_abandoned}")
+            time.sleep(retry_period)
+
+    def start_empty_lobbies_abandonment(self, db: Database):
+        empty_lobbies_thread = threading.Thread(
+            target=self.abandon_empty_lobbies,
+            args=[db],
+            daemon=True
+        )
+        empty_lobbies_thread.start()
 
     @staticmethod
     def clean_temporary_client_data(client: Client):
         client.tmp_data_strg.clear()
+
+    def cleanup_client(self, client: Client, db: Database):
+        self.clients.discard(client)
+        self.matchmaking_clients.discard(client)
+        db.kick_user_from_lobbies(client.tmp_data_strg["name"])
+        db.session_pool.pop(client.tmp_data_strg["name"], None)
+
+    @staticmethod
+    def heartbeat(client: Client) -> None:
+        while True:
+            try:
+                client.conn.sendall(b'Heartbeat\n')
+                time.sleep(5)
+            except Exception as e:
+                print(f"Heartbeat error for {client.tmp_data_strg['name']}: {e}")
+                break
+
+        client.heartbeat = False
+
+    def start_heartbeat(self, client: Client):
+        heartbeat_thread = threading.Thread(
+            target=self.heartbeat,
+            args=[client],
+            daemon=True
+        )
+        heartbeat_thread.start()
