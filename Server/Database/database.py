@@ -127,7 +127,7 @@ class Database:
         self.main_session.commit()
         return updated_count
 
-    def save_message_to_current_lobby(self, username: str, message: str):
+    def save_message_to_current_user_lobby(self, username: str, message: str):
         insert_query = text("""
             INSERT INTO game_chats (game_id, player_id, message, timestamp)
             SELECT player_games.game_id, p.id, :message, CURRENT_TIMESTAMP
@@ -137,3 +137,17 @@ class Database:
         params = {"username": username, "message": message}
         self.main_session.execute(insert_query, params)
         self.main_session.commit()
+
+    def get_player_names_in_lobby_with(self, username: str):
+        select_query = text("""
+            SELECT DISTINCT p2.name
+            FROM players p1
+            JOIN player_games pg1 ON p1.id = pg1.player_id
+            JOIN player_games pg2 ON pg1.game_id = pg2.game_id
+            JOIN players p2 ON pg2.player_id = p2.id
+            WHERE p1.name = :username
+        """)
+        params = {"username": username}
+        names = self.main_session.execute(select_query, params).fetchall()
+        self.main_session.commit()
+        return [name[0] for name in names]

@@ -20,6 +20,7 @@ class Server:
         self.PORT = port
 
         self.clients: set[Client] = set()
+        self.registered_clients: dict[str, Client] = {}
         self.matchmaking_clients: set[Client] = set()
 
         self.matchmaking_thread = None
@@ -50,7 +51,6 @@ class Server:
 
     def send_help(self, client: Client):
         help_text = client.get_all_available_commands_help(self.ALL_COMMANDS)
-        # help_text = self.ALL_COMMANDS.get_all_commands_help()
         client.conn.sendall(help_text.encode())
 
     def handle_client(self, client: Client, db: Database) -> None:
@@ -99,10 +99,11 @@ class Server:
                                             self.clean_temporary_client_data(client=client)
                                             continue
                                         db.create_user_session_into_pool(client.tmp_data_strg["name"])
+                                        client.state = ClientStates.LOGGED_IN
+                                        self.registered_clients[client.tmp_data_strg["name"]] = client
                                         client.conn.sendall(
                                             f"Successfully logged in into"
                                             f" {client.tmp_data_strg["name"]}'s account.".encode())
-                                        client.state = ClientStates.LOGGED_IN
 
                                     case ClientStates.REGISTRATION_NAME:
                                         name = command
@@ -137,6 +138,7 @@ class Server:
                                                 continue
                                             db.create_user_session_into_pool(client.tmp_data_strg["name"])
                                             client.state = ClientStates.LOGGED_IN
+                                            self.registered_clients[client.tmp_data_strg["name"]] = client
                                             client.conn.sendall(b'Registration complete.')
 
                                         else:
@@ -248,8 +250,27 @@ class Server:
 
                                         case CommandTypes.CHAT_COMMAND:
                                             message = " ".join(params[:])
-                                            db.save_message_to_current_lobby(client.tmp_data_strg["name"], message)
-                                            client.conn.sendall(f"{message}".encode())
+                                            try:
+                                                db.save_message_to_current_user_lobby(
+                                                    client.tmp_data_strg["name"],
+                                                    message)
+                                                names = db.get_player_names_in_lobby_with(
+                                                    client.tmp_data_strg["name"],
+                                                )
+                                                for name in names:
+                                                    print(f"Checking: {name}")
+                                                    if name in self.registered_clients.keys():
+                                                        print(f"Sending to: {name}")
+                                                        self.registered_clients[name].conn.sendall(
+                                                            f"{client.tmp_data_strg["name"]}: {message}".encode()
+                                                        )
+                                                client.conn.sendall(b"Sent message")
+                                                # client.conn.sendall(
+                                                #     f"{client.tmp_data_strg["name"]}: {message}".encode()
+                                                # )
+                                            except Exception as e:
+                                                print(e)
+                                                client.conn.sendall(b"Invalid message")
 
                                         case CommandTypes.LEAVE_COMMAND:
                                             db.kick_user_from_lobbies(client.tmp_data_strg["name"])
@@ -321,6 +342,7 @@ class Server:
 
     def cleanup_client(self, client: Client, db: Database):
         self.clients.discard(client)
+        self.registered_clients.pop(client.tmp_data_strg["name"], None)
         self.matchmaking_clients.discard(client)
         db.kick_user_from_lobbies(client.tmp_data_strg["name"])
         db.session_pool.pop(client.tmp_data_strg["name"], None)
