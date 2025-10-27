@@ -1,8 +1,8 @@
 import os
 
-DB_ENGINE = os.getenv('DATABASE_ENGINE')
-DB_USER = os.getenv('DATABASE_USER')
-DB_PASSWORD = os.getenv('DATABASE_PASSWORD')
-DB_HOST = os.getenv('DATABASE_HOST')
-DB_PORT = os.getenv('DATABASE_PORT')
-DB_NAME = os.getenv('DATABASE_NAME')
+POSTGRES_ENGINE = 'postgresql+psycopg2'
+POSTGRES_USER = os.getenv('POSTGRES_USER')
+POSTGRES_PASSWORD = os.getenv('POSTGRES_PASSWORD')
+POSTGRES_HOST = os.getenv('POSTGRES_HOST')
+POSTGRES_PORT = os.getenv('POSTGRES_PORT')
+POSTGRES_DB = os.getenv('POSTGRES_NAME')

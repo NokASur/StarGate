@@ -89,7 +89,8 @@ server_command_roster = CommandRoster(
         Command(
             CommandTypes.SELECT_LOBBY_COMMAND,
             {'select_lobby', 'select', 'selob', 's'},
-            "Selecting a lobby."
+            "Selecting a lobby. IMPORTANT, use -id X, where X is the id of the lobby you want to join\n"
+            "Example: s -id 1"
         ),
         Command(
             CommandTypes.CHAT_COMMAND,

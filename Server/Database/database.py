@@ -1,11 +1,19 @@
 from sqlalchemy import create_engine, text
-from Server.Database.config import DB_ENGINE, DB_HOST, DB_NAME, DB_PORT, DB_USER, DB_PASSWORD
+from Server.Database.config import POSTGRES_ENGINE, POSTGRES_HOST, POSTGRES_DB, POSTGRES_PORT, POSTGRES_USER, POSTGRES_PASSWORD
 from sqlalchemy.orm import sessionmaker, Session
 from Server.Database.models import Base
 
 import bcrypt
 
-DB_URL = f"{DB_ENGINE}://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+print("=== DATABASE CONFIGURATION ===")
+print(f"PG_ENGINE: {POSTGRES_ENGINE}")
+print(f"DB_USER: {POSTGRES_USER}")
+print(f"DB_PASSWORD: {POSTGRES_PASSWORD}")
+print(f"DB_HOST: {POSTGRES_HOST}")
+print(f"DB_PORT: {POSTGRES_PORT}")
+print(f"DB_NAME: {POSTGRES_DB}")
+
+DB_URL = f"{POSTGRES_ENGINE}://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
 
 engine = create_engine(DB_URL)
 

@@ -1,0 +1,12 @@
+run:
+    export PYTHONPATH=".../StarGate/Server:$PYTHONPATH"
+
+run from .../StarGate/Server:
+    pip install -r req.txt
+
+export DATABASE_ENGINE=postgresql+psycopg2
+export DATABASE_USER=postgres
+export DATABASE_PASSWORD=postgres
+export DATABASE_HOST=localhost
+export DATABASE_PORT=5432
+export DATABASE_NAME=StarGate

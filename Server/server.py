@@ -8,7 +8,7 @@ from commands import CommandTypes, CommandRoster, server_command_roster
 from client import Client, ClientStates
 from Server.Database.database import Database
 
-HOST = '127.0.0.1'
+HOST = '0.0.0.0'
 PORT = 65432
 
 
@@ -37,9 +37,9 @@ class Server:
             print(f"Matchmaking online")
             while True:
                 conn, addr = s.accept()
-                print(b"test1")
+                print("test1", flush=True)
                 client = Client(conn, addr)
-                print(b"test2")
+                print("test2", flush=True)
                 self.clients.add(client)
                 client_thread = threading.Thread(
                     target=self.handle_client,
@@ -47,14 +47,14 @@ class Server:
                     daemon=True
                 )
                 client_thread.start()
-                print(f"Active connections: {len(self.clients)}\n")
+                print(f"Active connections: {len(self.clients)}\n", flush=True)
 
     def send_help(self, client: Client):
         help_text = client.get_all_available_commands_help(self.ALL_COMMANDS)
         client.conn.sendall(help_text.encode())
 
     def handle_client(self, client: Client, db: Database) -> None:
-        print(f'Connected by {client.addr} to {self.HOST}:{self.PORT}\n')
+        print(f'Connected by {client.addr} to {self.HOST}:{self.PORT}\n', flush=True)
         connection_timestamp = datetime.now()
         self.start_heartbeat(client)
         greeting = True
@@ -71,6 +71,7 @@ class Server:
                         print(f"Heartbeat check failed for client {client.tmp_data_strg['name']}.\n")
 
                     if greeting:
+                        print("Greeting sent", flush=True)
                         client.conn.sendall(b'Welcome to StarGate Server! Reply with "h" to get command list.')
                         greeting = False
                     try:
@@ -289,18 +290,22 @@ class Server:
                         time.sleep(0.2)
                     except Exception as e:
                         print(f"Cannot recieve data due to exception: {e}")
+                        print(flush=True)
                         break
 
         except Exception as e:
             print(f"Error with client {client.addr}: {e}")
+            print(flush=True)
 
         finally:
             self.cleanup_client(client, db)
             print(f"Connection with {client.addr} closed")
+            print(flush=True)
 
     def matchmaking_loop(self, db: Database, retry_period=3):
         # Rewrite to work with db
         while True:
+
             print("Matchmaking loop")
             while len(self.matchmaking_clients) >= 2:
                 print("Matchmaking game found")
@@ -312,6 +317,7 @@ class Server:
                 player1.conn.sendall(b'Match found, entering lobby')
                 player2.conn.sendall(b'Match found, entering lobby')
             time.sleep(retry_period)
+            print(flush=True)
 
     def start_matchmaking(self, db: Database):
         matchmaking_thread = threading.Thread(
@@ -327,6 +333,7 @@ class Server:
             lobbies_abandoned = db.abandon_empty_lobbies()
             print(f"Empty lobbies abandoned: {lobbies_abandoned}")
             time.sleep(retry_period)
+            print(flush=True)
 
     def start_empty_lobbies_abandonment(self, db: Database):
         empty_lobbies_thread = threading.Thread(
@@ -352,6 +359,7 @@ class Server:
         while True:
             try:
                 client.conn.sendall(b'Heartbeat\n')
+                print(flush=True)
                 time.sleep(5)
             except Exception as e:
                 print(f"Heartbeat error for {client.tmp_data_strg['name']}: {e}")

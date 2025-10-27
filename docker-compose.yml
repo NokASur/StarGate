@@ -1,0 +1,23 @@
+services:
+  server:
+    build: .
+    volumes:
+      - .:/app
+    depends_on:
+      - db
+    ports:
+      - 65432:65432
+    env_file:
+      - database.env
+    restart: no
+
+
+  db:
+    image: postgres:15
+    ports:
+      - 5432:5432
+    env_file:
+      - database.env
+    restart: no
+
+
